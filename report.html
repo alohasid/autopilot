@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Інтерактивне Завдання: Місія БПЛА (SITL & Dronekit)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #F7F7F5;
+            color: #292524;
+        }
+        .step-content {
+            display: none;
+            transition: all 0.3s ease-in-out;
+        }
+        .step-content.active {
+            display: block;
+            animation: fadeIn 0.4s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .pulse-alert {
+            animation: pulse-border 2s infinite;
+        }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        stone: {
+                            50: '#fafaf9',
+                            100: '#f5f5f4',
+                            800: '#292524',
+                            900: '#1c1917',
+                        },
+                        teal: {
+                            600: '#0d9488',
+                            700: '#0f766e',
+                        },
+                        amber: {
+                            500: '#f59e0b',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="antialiased min-h-screen">
+
+    <!-- Chosen Palette: Warm Neutrals (Stone) with Teal (Action/Tech) and Amber/Red (Alerts/Constraints) accents -->
+    <!-- Application Structure Plan: The SPA is structured as an interactive "Mission Briefing Dashboard". It is divided into logical sections: 1. Mission Overview & Constraints (Header), 2. Setup Guide (Interactive Accordion to hide clutter), 3. Flight Telemetry & Environment Visualizations (Chart.js dashboard layout), 4. Delivery Checklist. This structure transitions the user from understanding requirements, to environment setup, to visualizing the core complex data (coordinates/wind), and finally confirming deliverables, optimizing cognitive load. -->
+    <!-- Visualization & Content Choices: 1. Setup Steps -> Interactive Accordion -> Keeps layout clean while providing detailed links and code snippets. 2. Wind Parameters -> Polar Area Chart -> Visually represents wind direction and magnitude better than raw text. 3. Flight Coordinates -> Scatter Plot -> Provides spatial awareness of the flight path between Point A and B relative to a grid. 4. Constraints (RC Override) -> Highlighted UI block with pulse animation -> Ensures critical task requirements are not missed. Libraries used: Vanilla JS for interactions, Chart.js for data visualization. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <div class="max-w-6xl mx-auto px-4 py-8 md:py-12">
+
+        <header class="mb-10 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-6 bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-stone-200">
+            <div>
+                <div class="inline-block bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-3">Технічне Завдання</div>
+                <h1 class="text-3xl md:text-4xl font-extrabold text-stone-900 mb-2">Автономна Місія БПЛА</h1>
+                <p class="text-stone-600 max-w-2xl text-lg">Розробка скрипта керування коптером через SITL симулятор з використанням Dronekit. Зліт, політ за координатами та точна посадка.</p>
+            </div>
+            <div class="bg-red-50 border-2 border-red-500 rounded-xl p-4 text-center pulse-alert max-w-xs w-full">
+                <div class="text-2xl mb-1">⚠️</div>
+                <h3 class="font-bold text-red-700 uppercase tracking-wide">Критична вимога</h3>
+                <p class="text-sm text-red-600 mt-1 font-medium">Використовувати виключно <strong>RC Override</strong>! Режим: Stabilize. Точність посадки впливає на бал.</p>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <div class="lg:col-span-1 space-y-6">
+
+                <section class="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+                    <div class="p-5 border-b border-stone-100 bg-stone-50">
+                        <h2 class="text-xl font-bold text-stone-800 flex items-center gap-2">
+                            <span>🛠️</span> Етапи підготовки
+                        </h2>
+                        <p class="text-sm text-stone-500 mt-1">Натисніть на крок для відображення інструкцій та параметрів.</p>
+                    </div>
+
+                    <div class="divide-y divide-stone-100">
+                        <div class="step-container">
+                            <button class="w-full text-left p-5 hover:bg-stone-50 focus:outline-none flex justify-between items-center font-semibold text-stone-700" onclick="toggleStep('step1')">
+                                <span>1. Встановлення Mission Planner</span>
+                                <span class="text-stone-400 text-xl font-light toggle-icon" id="icon-step1">+</span>
+                            </button>
+                            <div id="step1" class="step-content px-5 pb-5 pt-0">
+                                <p class="text-sm text-stone-600 mb-3">Завантажте та встановіть середовище для Windows або Ubuntu.</p>
+                                <a href="https://ardupilot.org/planner/" target="_blank" class="inline-block bg-stone-200 text-stone-800 hover:bg-stone-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors">Перейти до завантаження &#8599;</a>
+                            </div>
+                        </div>
+
+                        <div class="step-container bg-teal-50/30">
+                            <button class="w-full text-left p-5 hover:bg-stone-50 focus:outline-none flex justify-between items-center font-semibold text-stone-700" onclick="toggleStep('step2')">
+                                <span>2. Запуск SITL та Погода</span>
+                                <span class="text-stone-400 text-xl font-light toggle-icon" id="icon-step2">+</span>
+                            </button>
+                            <div id="step2" class="step-content px-5 pb-5 pt-0">
+                                <p class="text-sm text-stone-600 mb-3">Запустіть симулятор та встановіть наступні параметри вітру для створення складних умов керування:</p>
+                                <ul class="space-y-2 text-sm font-mono bg-stone-900 text-teal-400 p-3 rounded-lg">
+                                    <li>SIM_WIND_SPD = 3</li>
+                                    <li>SIM_WIND_DIR = 30</li>
+                                    <li>SIM_WIND_TURB = 2</li>
+                                    <li>SIM_WIND_TURB_FREQ = 0.2</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="step-container">
+                            <button class="w-full text-left p-5 hover:bg-stone-50 focus:outline-none flex justify-between items-center font-semibold text-stone-700" onclick="toggleStep('step3')">
+                                <span>3. Налаштування Dronekit</span>
+                                <span class="text-stone-400 text-xl font-light toggle-icon" id="icon-step3">+</span>
+                            </button>
+                            <div id="step3" class="step-content px-5 pb-5 pt-0">
+                                <p class="text-sm text-stone-600 mb-3">Бібліотека для керування дроном через Python.</p>
+                                <p class="text-xs text-stone-500 mb-1">Документація: <a href="https://dronekit.io/" class="text-teal-600 hover:underline" target="_blank">dronekit.io</a></p>
+                                <div class="bg-stone-900 flex justify-between items-center rounded-lg overflow-hidden">
+                                    <code class="text-teal-400 text-sm p-3 block">pip install dronekit</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden p-5">
+                    <h2 class="text-xl font-bold text-stone-800 flex items-center gap-2 mb-4">
+                        <span>📋</span> Результат роботи
+                    </h2>
+                    <p class="text-sm text-stone-600 mb-4">Формат здачі готового завдання для перевірки:</p>
+
+                    <div class="space-y-3">
+                        <label class="flex items-center gap-3 p-3 bg-stone-50 rounded-lg border border-stone-200 cursor-pointer hover:bg-stone-100 transition-colors">
+                            <input checked type="checkbox" class="w-5 h-5 text-teal-600 rounded focus:ring-teal-500 border-stone-300">
+                            <span class="text-sm font-medium text-stone-700 flex-1">Код розміщено на GitHub</span>
+                            <span class="text-xl">💻</span>
+                        </label>
+                        <label class="flex items-center gap-3 p-3 bg-stone-50 rounded-lg border border-stone-200 cursor-pointer hover:bg-stone-100 transition-colors">
+                            <input checked type="checkbox" class="w-5 h-5 text-teal-600 rounded focus:ring-teal-500 border-stone-300">
+                            <span class="text-sm font-medium text-stone-700 flex-1">Відео екрану (запуск + політ)</span>
+                            <span class="text-xl">📼</span>
+                        </label>
+                        <label class="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors">
+                            <input checked type="checkbox" class="w-5 h-5 text-red-600 rounded focus:ring-red-500 border-red-300">
+                            <span class="text-sm font-medium text-red-800 flex-1">Перевірено: політ у Stabilize через RC Override</span>
+                            <span class="text-xl">🕹️</span>
+                        </label>
+                    </div>
+                </section>
+            </div>
+
+            <div class="lg:col-span-2 space-y-8">
+
+                <section class="bg-white rounded-2xl shadow-sm border border-stone-200 p-6 md:p-8">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold text-stone-900 flex items-center gap-2">
+                            <span>🗺️</span> Карта маршруту та координати
+                        </h2>
+                        <p class="text-stone-600 mt-2">Візуалізація точок старту та цільової точки посадки. Дрон має набрати висоту, пролетіти дистанцію та здійснити точну посадку.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div class="bg-stone-50 p-4 rounded-xl border border-stone-200 flex items-start gap-4">
+                            <div class="bg-white p-2 rounded-lg shadow-sm text-2xl border border-stone-100">🟢</div>
+                            <div>
+                                <h4 class="font-bold text-stone-800">Точка А (Старт)</h4>
+                                <div class="text-sm font-mono text-stone-600 mt-1">LAT: 50.450739</div>
+                                <div class="text-sm font-mono text-stone-600">LON: 30.461242</div>
+                                <div class="text-xs text-stone-500 mt-1">Висота утримання: <span class="font-bold text-teal-600">100 м</span></div>
+                            </div>
+                        </div>
+                        <div class="bg-stone-50 p-4 rounded-xl border border-stone-200 flex items-start gap-4">
+                            <div class="bg-white p-2 rounded-lg shadow-sm text-2xl border border-stone-100">🏁</div>
+                            <div>
+                                <h4 class="font-bold text-stone-800">Точка Б (Ціль)</h4>
+                                <div class="text-sm font-mono text-stone-600 mt-1">LAT: 50.443326</div>
+                                <div class="text-sm font-mono text-stone-600">LON: 30.448078</div>
+                                <div class="text-xs font-bold text-amber-600 mt-1">Ціль: Ідеально точна посадка</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-stone-50 rounded-xl p-4 border border-stone-200">
+                        <div class="chart-container">
+                            <canvas id="flightMapChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="bg-white rounded-2xl shadow-sm border border-stone-200 p-6 md:p-8">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold text-stone-900 flex items-center gap-2">
+                            <span>🌪️</span> Аналіз погодних умов
+                        </h2>
+                        <p class="text-stone-600 mt-2">Симуляція включає вітер та турбулентність, які необхідно враховувати під час утримання висоти та напрямку в режимі Stabilize.</p>
+                    </div>
+
+                    <div class="bg-stone-50 rounded-xl p-4 border border-stone-200">
+                        <div class="chart-container">
+                            <canvas id="windChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleStep(stepId) {
+            const content = document.getElementById(stepId);
+            const icon = document.getElementById('icon-' + stepId);
+            const allContents = document.querySelectorAll('.step-content');
+            const allIcons = document.querySelectorAll('.toggle-icon');
+
+            let isCurrentlyActive = content.classList.contains('active');
+
+            allContents.forEach(el => el.classList.remove('active'));
+            allIcons.forEach(el => el.innerHTML = '+');
+
+            if (!isCurrentlyActive) {
+                content.classList.add('active');
+                icon.innerHTML = '−';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+
+            toggleStep('step2');
+
+            const ctxMap = document.getElementById('flightMapChart').getContext('2d');
+            const pointA = { x: 30.461242, y: 50.450739 };
+            const pointB = { x: 30.448078, y: 50.443326 };
+
+            new Chart(ctxMap, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Маршрут',
+                        data: [pointA, pointB],
+                        showLine: true,
+                        borderColor: '#9ca3af',
+                        borderDash: [5, 5],
+                        borderWidth: 2,
+                        pointBackgroundColor: ['#10b981', '#ef4444'],
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 8,
+                        pointHoverRadius: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#292524',
+                            titleFont: { size: 14 },
+                            bodyFont: { size: 13 },
+                            padding: 12,
+                            callbacks: {
+                                label: function(context) {
+                                    const pointName = context.dataIndex === 0 ? 'Точка А (Старт)' : 'Точка Б (Фініш)';
+                                    return [
+                                        pointName,
+                                        `Довгота (X): ${context.raw.x}`,
+                                        `Широта (Y): ${context.raw.y}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: { display: true, text: 'Довгота (Longitude)', color: '#78716c' },
+                            grid: { color: '#e7e5e4' }
+                        },
+                        y: {
+                            type: 'linear',
+                            title: { display: true, text: 'Широта (Latitude)', color: '#78716c' },
+                            grid: { color: '#e7e5e4' }
+                        }
+                    }
+                }
+            });
+
+            const ctxWind = document.getElementById('windChart').getContext('2d');
+
+            new Chart(ctxWind, {
+                type: 'polarArea',
+                data: {
+                    labels: [
+                        'Швидкість (m/s)',
+                        'Напрямок (° / 10)',
+                        'Турбулентність',
+                        'Частота турб. (x10)'
+                    ],
+                    datasets: [{
+                        data: [3, 30/10, 2, 0.2*10],
+                        backgroundColor: [
+                            'rgba(14, 116, 144, 0.7)',
+                            'rgba(16, 185, 129, 0.7)',
+                            'rgba(245, 158, 11, 0.7)',
+                            'rgba(239, 68, 68, 0.7)'
+                        ],
+                        borderColor: '#ffffff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                color: '#44403c',
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#292524',
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    let value = context.raw;
+                                    if (context.dataIndex === 1) value = value * 10 + '°';
+                                    if (context.dataIndex === 3) value = value / 10;
+                                    return `${label}: ${value}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        r: {
+                            ticks: { display: false },
+                            grid: { color: '#e7e5e4' }
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
