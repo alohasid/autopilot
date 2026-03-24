@@ -1,115 +1,125 @@
+import collections
 import math
 import time
-import collections
-collections.MutableMapping = collections.abc.MutableMapping
+
+try:
+    collections.MutableMapping = collections.abc.MutableMapping
+    collections.Iterable = collections.abc.Iterable
+except AttributeError:
+    pass
+
 from dronekit import connect, VehicleMode
 
-import math
-import time
-# --- КООРДИНАТИ ---
-# Точка А (Старт): 50.450739, 30.461242
-# Точка Б (Ціль): 50.443326, 30.448078
 TARGET_LAT = 50.443326
 TARGET_LON = 30.448078
 TARGET_ALT = 100.0
 
-# Підключення до SITL
-print("Підключення до дрона...")
 vehicle = connect('127.0.0.1:14550', wait_ready=True)
 
 
-def get_distance_metres(loc1, lat2, lon2):
-    dlat = lat2 - loc1.lat
-    dlong = lon2 - loc1.lon
-    return math.sqrt((dlat * dlat) + (dlong * dlong)) * 1.113195e5
+def get_distance_metres(loc, target_lat, target_lon):
+    dlat = target_lat - loc.lat
+    dlong = target_lon - loc.lon
+    return math.sqrt((dlat * dlat) + (dlong * dlong)) * 111319.5
 
 
-def get_bearing(loc1, lat2, lon2):
-    off_x = lon2 - loc1.lon
-    off_y = lat2 - loc1.lat
-    bearing = 90.00 + math.atan2(-off_y, off_x) * 57.2957795
-    if bearing < 0: bearing += 360.00
-    return bearing
-
-
-def arm_and_takeoff_stabilize(aTargetAltitude):
-    print("Перехід у режим STABILIZE...")
+def arm_and_takeoff(target_alt):
     vehicle.mode = VehicleMode("STABILIZE")
-
-    while not vehicle.is_armable:
-        print(" Очікування ініціалізації...")
-        time.sleep(1)
-
-    print("Армінг моторів (ARM)...")
+    while not vehicle.is_armable: time.sleep(1)
     vehicle.armed = True
-    while not vehicle.armed:
-        time.sleep(1)
-
-    print("Зліт через RC Override (Throttle Up)...")
-    # RC 3: Газ (1000-2000). 1500 - нейтраль.
-    while True:
-        alt = vehicle.location.global_relative_frame.alt
-        print(f" Поточна висота: {alt:.2f} м")
-        if alt >= aTargetAltitude * 0.95:
-            print("Висота 100м досягнута.")
-            vehicle.channels.overrides['3'] = 1500  # Утримання
-            break
-        else:
-            vehicle.channels.overrides['3'] = 1680  # Активний підйом
-        time.sleep(0.2)
-
-
-def fly_to_target():
-    print("Початок руху до Точки Б...")
-    try:
-        while True:
-            loc = vehicle.location.global_relative_frame
-            dist = get_distance_metres(loc, TARGET_LAT, TARGET_LON)
-            bearing = get_bearing(loc, TARGET_LAT, TARGET_LON)
-            heading = vehicle.heading  # Куди дивиться дрон
-
-            print(f"Відстань: {dist:.1f}м | Курс: {bearing:.1f}° | Висота: {loc.alt:.1f}м")
-
-            if dist < 3.0:  # Радіус 3 метри для зупинки
-                print("Точка Б досягнута. Починаємо посадку.")
-                vehicle.channels.overrides = {}
-                break
-
-            # КЕРУВАННЯ (RC OVERRIDE)
-            # RC 2: Pitch (нахил вперед/назад). <1500 вперед.
-            vehicle.channels.overrides['2'] = 1420  # Летимо вперед
-
-            # RC 3: Утримання висоти (простий контроль)
-            if loc.alt < TARGET_ALT - 1:
-                vehicle.channels.overrides['3'] = 1580  # Піднятися
-            elif loc.alt > TARGET_ALT + 1:
-                vehicle.channels.overrides['3'] = 1420  # Опуститися
-            else:
-                vehicle.channels.overrides['3'] = 1510  # Стабільно
-
-            # RC 4: Yaw (поворот носа на ціль)
-            # Для ідеального балу можна додати корекцію курсу тут
-
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        vehicle.channels.overrides = {}
-
-
-def land_perfectly():
-    print("Фінальна посадка в Точці Б...")
-    # Поступово зменшуємо газ
-    for thr in range(1500, 1000, -10):
-        vehicle.channels.overrides['3'] = thr
+    while not vehicle.armed: time.sleep(0.5)
+    while vehicle.location.global_relative_frame.alt < target_alt * 0.95:
+        vehicle.channels.overrides['3'] = 1720
         time.sleep(0.1)
-        if vehicle.location.global_relative_frame.alt < 0.2:
+    vehicle.channels.overrides['3'] = 1515
+
+
+def fly_to_target_pid():
+    kp = 220000.0
+    ki = 2500.0
+    kd = 900000.0
+
+    i_lat, i_lon = 0.0, 0.0
+    last_err_lat, last_err_lon = 0.0, 0.0
+    last_time = time.time()
+
+    print(">>> Політ до Точки Б: Агресивний PID активовано")
+
+    while True:
+        curr = vehicle.location.global_relative_frame
+        dist = get_distance_metres(curr, TARGET_LAT, TARGET_LON)
+        now = time.time()
+        dt = now - last_time
+        if dt <= 0: dt = 0.02
+        last_time = now
+
+        if dist < 0.6:
+            print(f"DONE! Target B reached. Final Dist: {dist:.2f}m")
+            vehicle.channels.overrides.update({'1': 1500, '2': 1500})
             break
 
-    print("Посадка виконана. Disarm.")
+        err_lat = TARGET_LAT - curr.lat
+        err_lon = TARGET_LON - curr.lon
+
+        i_lat += err_lat * dt
+        i_lon += err_lon * dt
+        i_lat = max(-1.2, min(1.2, i_lat))
+        i_lon = max(-1.2, min(1.2, i_lon))
+
+        d_lat = (err_lat - last_err_lat) / dt
+        d_lon = (err_lon - last_err_lon) / dt
+        last_err_lat, last_err_lon = err_lat, err_lon
+
+        pitch_out = (err_lat * kp) + (i_lat * ki) + (d_lat * kd)
+        roll_out = (err_lon * kp) + (i_lon * ki) + (d_lon * kd)
+
+        vehicle.channels.overrides['2'] = int(max(1100, min(1900, 1500 - pitch_out)))
+        vehicle.channels.overrides['1'] = int(max(1100, min(1900, 1500 + roll_out)))
+
+        alt_err = TARGET_ALT - curr.alt
+        vehicle.channels.overrides['3'] = 1500 + int(alt_err * 70)
+
+        print(f"Dist: {dist:.2f}m | RC_P: {vehicle.channels.overrides['2']} | Alt: {curr.alt:.1f}m")
+        time.sleep(0.02)
+
+
+def precision_landing():
+    print(">>> Фінальна посадка точно в нуль (п. 5)...")
+    kp_l = 400000.0
+    ki_l = 3500.0
+    i_lat, i_lon = 0.0, 0.0
+    last_time = time.time()
+
+    while True:
+        curr = vehicle.location.global_relative_frame
+        if curr.alt < 0.1:
+            vehicle.channels.overrides = {'3': 1000}
+            break
+
+        now = time.time()
+        dt = now - last_time
+        if dt <= 0: dt = 0.05
+        last_time = now
+
+        err_lat = TARGET_LAT - curr.lat
+        err_lon = TARGET_LON - curr.lon
+        i_lat += err_lat * dt
+        i_lon += err_lon * dt
+
+        vehicle.channels.overrides['2'] = int(max(1200, min(1800, 1500 - (err_lat * kp_l + i_lat * ki_l))))
+        vehicle.channels.overrides['1'] = int(max(1200, min(1800, 1500 + (err_lon * kp_l + i_lon * ki_l))))
+
+        vehicle.channels.overrides['3'] = 1415
+        time.sleep(0.05)
+
     vehicle.armed = False
     vehicle.close()
 
 
-# Запуск місії
-arm_and_takeoff_stabilize(TARGET_ALT)
-fly_to_target()
-land_perfectly()
+try:
+    arm_and_takeoff(TARGET_ALT)
+    fly_to_target_pid()
+    precision_landing()
+except KeyboardInterrupt:
+    vehicle.channels.overrides = {}
+    vehicle.close()
